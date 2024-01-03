@@ -1,5 +1,3 @@
-#include "lab1_io.h"
-
 #include <stdlib.h>
 #include <time.h>
 #include <bits/stdc++.h>
@@ -101,7 +99,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     const int blocks = (N + threads - 1) / threads;
 
     
-    // //array to keep a track of distances of a point from all centroids, to take the minimum out of them
+    //array to keep a track of distances of a point from all centroids, to take the minimum out of them
 
     double *d_distances;
     cudaMalloc((void**)&d_distances, N * K * sizeof(double));
