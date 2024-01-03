@@ -144,7 +144,7 @@ void mean_recompute(int K, int N, Point points[], Point centr[])
         centr[i].x = sum[i].x / count[i];
         centr[i].y = sum[i].y / count[i];
         centr[i].z = sum[i].z / count[i];
-        printf("%d %d\n", i, count[i]);
+        // printf("%d %d\n", i, count[i]);
     }
 }
 

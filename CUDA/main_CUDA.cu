@@ -27,10 +27,11 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
     
     //computing distance of a point and assigning all the data points, a centroid/cluster value
     int point_id = blockIdx.x*1024+threadIdx.x;
+    Point cur = points[point_id];
     if(point_id>N) return;
 
     for(int j=0; j<K ; j++){
-        distances[point_id*K+j] = euclid(points[point_id], centr[j]);
+        distances[point_id*K+j] = euclid(cur, centr[j]);
     }
     int index = 0;
     for(int i = 1; i < K; i++)
