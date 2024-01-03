@@ -32,3 +32,15 @@ Device 0: "NVIDIA GeForce GTX 1080"
   Device PCI Domain ID / Bus ID / location ID:   0 / 10 / 0
   Compute Mode:
      < Default (multiple host threads can use ::cudaSetDevice() with device simultaneously) >
+
+
+# cuda compile
+nvcc -std=c++11 main_CUDA.cu  -o cuda.out
+# cuda run
+srun -N1 -n1 --gres=gpu:1 ./cuda.out 3 sample_dataset_5000_3.txt output_datapoints_cuda output_centroids_cuda
+
+# Sequential compile
+g++ main_sequential.c lab1_io.c Kmeans-Sequential.cpp -fopenmp -o seq.out
+# Sequential run
+srun -n 1 ./seq.out 3 sample_dataset_5000_3.txt output_datapoints output_centroids
+

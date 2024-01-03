@@ -62,7 +62,7 @@ __global__ void mean_recompute(int N, Point *points, Point *centr){
     centr[cluster_id].x = sum.x/count;
     centr[cluster_id].y = sum.y/count;
     centr[cluster_id].z = sum.z/count;
-    printf("%d %d\n",cluster_id, count);
+    // printf("%d %d\n",cluster_id, count);
 }
 
 //driver function
