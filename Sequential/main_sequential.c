@@ -61,8 +61,9 @@ int main(int argc, char const *argv[])
 	// 	-- Pre-defined function --
 	// 	reads cluster_points and centroids and save it it appropriate files
 	// */
+
 	clusters_out (argv[3], N, cluster_points);
-	centroids_out (argv[4], K, num_iterations, centroids);
+	// centroids_out (argv[4], K, num_iterations, centroids);
 
 	computation_time = ((double) (end_time - start_time)) / CLOCKS_PER_SEC;
 	printf("Time Taken: %lf \n", computation_time);
