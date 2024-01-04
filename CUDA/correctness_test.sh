@@ -13,4 +13,4 @@ else
     echo "Files are different! Something is wrong."
 fi
 
-# rm "$OUTPUT_DATAPOINTS"
+rm "$OUTPUT_DATAPOINTS"
