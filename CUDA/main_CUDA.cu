@@ -104,19 +104,6 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
 
     double *d_distances;
     cudaMalloc((void**)&d_distances, N * K * sizeof(double));
-    //cudaMemcpy(d_distances, distances,N * K * sizeof(double), cudaMemcpyHostToDevice); 
-    // //computing distance of a point and assigning all
-    // for (int i=0; i<N; i++){
-    //     for(int j=0; j<K ; j++){
-    //         distances[j] = euclid(points[i], centr[j]);
-    //     }
-    //     int index = 0;
-    //     for(int i = 1; i < K; i++){
-    //         if(distances[i] < distances[index])
-    //             index = i;
-    //     }
-    //     points[i].cluster = index;
-    // }
     assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances);
     cudaDeviceSynchronize();
 
@@ -124,15 +111,14 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
 
     mean_recompute<<<1, K>>>(N, d_points, d_centr);
     cudaDeviceSynchronize();
-    // putback(centr, K);
 
     //---------------------------
 
     int iterations = 1;
     int count;
+
     do {
         // mean_recompute(K, N, points,centr);
-        // putback(centr, K);
         mean_recompute<<<1, K>>>(N, d_points, d_centr);
         cudaDeviceSynchronize();
         //storing old values for convergence check
@@ -151,7 +137,8 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
                 count++;
         }
     } while(count!=N);
-    printf("%d\n", iterations);
+
+    // printf("%d\n", iterations);
 
     cudaMemcpy(points, d_points, N * sizeof(Point), cudaMemcpyDeviceToHost);
     cudaMemcpy(centr, d_centr, K * sizeof(Point), cudaMemcpyDeviceToHost);
@@ -160,7 +147,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     //---------------------------
 
     *data_point_cluster= (int*) calloc(4*N, sizeof(int));
-    *centroids = (float*) calloc(vect.size(), sizeof(float));
+    // *centroids = (float*) calloc(vect.size(), sizeof(float));
 
     int q = 0;
     for (int i = 0; i< 4*N; i+=4){
@@ -170,28 +157,12 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         data_point_cluster[0][i+3] = points[q].cluster;
         q++;
     }
-    for (int i = 0; i<vect.size(); i++){
-        centroids[0][i] = vect[i];
-    }
+    // for (int i = 0; i<vect.size(); i++){
+    //     centroids[0][i] = vect[i];
+    // }
 
     * num_iterations = vect.size()/K -1 ;
 }
-
-//funtion to recompute the new centroids for each cluster
-//N is the total number of data points and K is the total number of clusters
-// void mean_recompute(int K, int N, Point points[], Point centr[]){
-//     int count[K];
-//     Point sum[K];
-//     for(int i=0; i< N ; i++){
-//         count[points[i].cluster]++;
-//         sum[points[i].cluster] = addtwo(points[i],sum[points[i].cluster] );
-//     }
-//     for(int i=0; i< K ; i++){
-//         centr[i].x = sum[i].x/count[i];
-//         centr[i].y = sum[i].y/count[i];
-//         centr[i].z = sum[i].z/count[i];
-//     }
-// }
 
 //assuming they are the same cluster
 __device__ Point addtwo(Point a, Point b){
@@ -203,25 +174,6 @@ __device__ Point addtwo(Point a, Point b){
     return ans;
 }
 
-// void assignclusters(Point points[], Point centr[],int K, int N){
-//     double distances[K];
-//     //computing distance of a point and assigning all the data points, a centroid/cluster value
-//     for (int i=0; i<N; i++)
-//     {
-//         for(int j=0; j<K ; j++){
-//             distances[j] = euclid(points[i], centr[j]);
-//         }
-//         int index = 0;
-//         for(int i = 1; i < K; i++)
-//         {
-//             if(distances[i] < distances[index])
-//                 index = i;
-//         }
-//         //assigning the minimum distance cluster, which is an index
-//         points[i].cluster = index;
-//     }
-// }
-
 //function to calculate euclidea distance between two points
 __device__ double euclid(Point a, Point b){
     double x = a.x- b.x;
@@ -230,14 +182,6 @@ __device__ double euclid(Point a, Point b){
     double dist = sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2));
     return dist;
 }
-
-// __device__ void putback(Point centr[],int K){
-//     for (int i =0; i<K; i++) {
-//         vect.push_back(centr[i].x);
-//         vect.push_back(centr[i].y);
-//         vect.push_back(centr[i].z);
-//     }
-// }
 
 void dataset_in (const char* dataset_filename, int* N, int** data_points){
 	FILE *fin = fopen(dataset_filename, "r");
@@ -340,7 +284,7 @@ int main(int argc, char const *argv[])
 	// 	reads cluster_points and centroids and save it it appropriate files
 	// */
 	clusters_out (argv[3], N, cluster_points);
-	centroids_out (argv[4], K, num_iterations, centroids);
+	// centroids_out (argv[4], K, num_iterations, centroids);
 
 	computation_time = ((double) (end_time - start_time)) / CLOCKS_PER_SEC;
 	printf("Time Taken: %lf \n", computation_time);
