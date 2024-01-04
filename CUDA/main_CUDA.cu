@@ -23,7 +23,7 @@ __device__ double euclid(Point a, Point b);
 __device__ Point mean(Point arr[], int N);
 // __device__ void putback(Point centr[],int K);
 
-__global__ void assign_clusters(Point *points, Point *centr,int K, int N, double *distances){
+__global__ void assign_clusters(Point *points, Point *centr,int K, int N, double *distances, short *d_modify_record){
     
     //computing distance of a point and assigning all the data points, a centroid/cluster value
     int point_id = blockIdx.x*1024+threadIdx.x;
@@ -39,6 +39,8 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
         if(distances[point_id*K+i] < distances[point_id*K+index])
             index = i;
     }
+    //assign modify to 1 if same and 0 if different
+    d_modify_record[point_id] = (cur.cluster ^ index) != 0;
     //assigning the minimum distance cluster, which is an index
     points[point_id].cluster = index;
 }
@@ -66,10 +68,24 @@ __global__ void mean_recompute(int N, Point *points, Point *centr){
     // printf("%d %d\n",cluster_id, count);
 }
 
+__global__ void check_modify(short *modify_record, int *d_not_done, int N){
+    int point_id = blockIdx.x*1024+threadIdx.x;
+    if(point_id>N) return;
+    if(modify_record[point_id] == 1){
+        atomicOr(d_not_done, 1);
+    }
+}
+
 //driver function
 void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float** centroids, int* num_iterations){
 
+    int* d_not_done;
+    int not_done;
+    cudaMalloc((void**)&d_not_done, sizeof(int));
+    cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
     Point points[N];
+    short modify_record[N];
+    short *d_modify_record;
     Point *d_points, *d_centr;
     //---------------------------
     int j=0;
@@ -90,10 +106,13 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         int random = rand()%N;//some random value
         centr[i] = points[random];
     }
+    
     cudaMalloc((void**)&d_points, N * sizeof(Point));
     cudaMemcpy(d_points, points, N * sizeof(Point), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&d_centr, K * sizeof(Point));
     cudaMemcpy(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
+    cudaMalloc((void**)&d_modify_record, N * sizeof(short));
+    cudaMemcpy(d_modify_record, modify_record, N * sizeof(short), cudaMemcpyHostToDevice); 
 
     //---------------------------
     const int threads = 1024;
@@ -104,7 +123,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
 
     double *d_distances;
     cudaMalloc((void**)&d_distances, N * K * sizeof(double));
-    assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances);
+    assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
     cudaDeviceSynchronize();
 
     //---------------------------
@@ -115,28 +134,25 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     //---------------------------
 
     int iterations = 1;
-    int count;
+
 
     do {
-        // mean_recompute(K, N, points,centr);
+        /*initial not_done*/
+        not_done = 0;
+        cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice);
+
         mean_recompute<<<1, K>>>(N, d_points, d_centr);
         cudaDeviceSynchronize();
-        //storing old values for convergence check
-        int old[N];
-        for (int i=0; i<N; i++){
-            old[i] = points[i].cluster;
-        }
-        // assignclusters(points, centr, K, N);
-        assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances);
+
+        assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
         cudaDeviceSynchronize();
-        cudaMemcpy(points, d_points, N * sizeof(Point), cudaMemcpyDeviceToHost);
+
+        check_modify<<<blocks, threads>>>(d_modify_record, d_not_done, N);
+        cudaDeviceSynchronize();
+        cudaMemcpy(&not_done, d_not_done, sizeof(int), cudaMemcpyDeviceToHost);
+
         iterations++;
-        count = 0;
-        for (int i=0; i<N; i++){
-            if (old[i] == points[i].cluster)
-                count++;
-        }
-    } while(count!=N);
+    } while(not_done);
 
     // printf("%d\n", iterations);
 
