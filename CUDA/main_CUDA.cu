@@ -28,7 +28,7 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
     //computing distance of a point and assigning all the data points, a centroid/cluster value
     int point_id = blockIdx.x*1024+threadIdx.x;
     Point cur = points[point_id];
-    if(point_id>N) return;
+    if(point_id>=N) return;
 
     for(int j=0; j<K ; j++){
         distances[point_id*K+j] = euclid(cur, centr[j]);
@@ -45,27 +45,34 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
     points[point_id].cluster = index;
 }
 
-//funtion to recompute the new centroids for each cluster
-//N is the total number of data points and K is the total number of clusters
-__global__ void mean_recompute(int N, Point *points, Point *centr){
-    int count = 0;
-    Point sum;
-    sum.x = 0;
-    sum.y = 0;
-    sum.z = 0;
+__global__ void update_centroids(int K, Point *sum, int *count, Point *centr){
     int cluster_id = threadIdx.x;
-    for(int i=0; i< N ; i++){
-        if(cluster_id == points[i].cluster){
-            count++;
-            sum.x += points[i].x;
-            sum.y += points[i].y;
-            sum.z += points[i].z;
-        } 
-    }
-    centr[cluster_id].x = sum.x/count;
-    centr[cluster_id].y = sum.y/count;
-    centr[cluster_id].z = sum.z/count;
-    // printf("%d %d\n",cluster_id, count);
+    centr[cluster_id].x = sum[cluster_id].x/count[cluster_id];
+    centr[cluster_id].y = sum[cluster_id].y/count[cluster_id];
+    centr[cluster_id].z = sum[cluster_id].z/count[cluster_id];
+}
+__device__ double atomicAddDouble(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+
+// Sum all data points into sum and count the number of points in the specific cluster with "count"
+__global__ void Points_Sum_Up(int N, Point *points, Point *sum, int* count){
+    int point_id = blockIdx.x*1024+threadIdx.x;
+    if(point_id>=N) return;
+    Point cur = points[point_id];
+    atomicAdd(&count[cur.cluster], 1);
+    /*TODO:should use Atomic but there's no atomic add for double in current GPU board*/
+    atomicAddDouble(&sum[cur.cluster].x, cur.x);
+    atomicAddDouble(&sum[cur.cluster].y, cur.y);
+    atomicAddDouble(&sum[cur.cluster].z, cur.z);
 }
 
 __global__ void check_modify(short *modify_record, int *d_not_done, int N){
@@ -76,13 +83,26 @@ __global__ void check_modify(short *modify_record, int *d_not_done, int N){
     }
 }
 
+__global__ void clear(Point *sum, int *count){
+    int cluster_id = threadIdx.x;
+    sum[cluster_id].x = 0;
+    sum[cluster_id].y = 0;
+    sum[cluster_id].z = 0;
+    count[cluster_id] = 0;
+}
+
 //driver function
 void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float** centroids, int* num_iterations){
 
     int* d_not_done;
     int not_done;
-    cudaMalloc((void**)&d_not_done, sizeof(int));
-    cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
+    Point *d_sum;
+    Point sum[K];
+    int count[K];
+    int *d_count;
+    memset(count, 0, sizeof(count));
+    memset(sum, 0, sizeof(sum));
+    
     Point points[N];
     short modify_record[N];
     short *d_modify_record;
@@ -113,6 +133,12 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     cudaMemcpy(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
     cudaMalloc((void**)&d_modify_record, N * sizeof(short));
     cudaMemcpy(d_modify_record, modify_record, N * sizeof(short), cudaMemcpyHostToDevice); 
+    cudaMalloc((void**)&d_not_done, sizeof(int));
+    cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
+    cudaMalloc((void**)&d_sum, K * sizeof(Point));
+    cudaMemcpy(d_sum, sum, K * sizeof(Point), cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_count, K * sizeof(int));
+    cudaMemcpy(d_count, count, K * sizeof(int), cudaMemcpyHostToDevice);
 
     //---------------------------
     const int threads = 1024;
@@ -128,9 +154,12 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
 
     //---------------------------
 
-    mean_recompute<<<1, K>>>(N, d_points, d_centr);
+    Points_Sum_Up<<<blocks, threads>>>(N, d_points, d_sum, d_count);
     cudaDeviceSynchronize();
-
+    update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
+    cudaDeviceSynchronize();
+    clear<<<1, K>>>(d_sum, d_count);
+    cudaDeviceSynchronize();
     //---------------------------
 
     int iterations = 1;
@@ -141,7 +170,11 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         not_done = 0;
         cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice);
 
-        mean_recompute<<<1, K>>>(N, d_points, d_centr);
+        Points_Sum_Up<<<blocks, threads>>>(N, d_points, d_sum, d_count);
+        cudaDeviceSynchronize();
+        update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
+        cudaDeviceSynchronize();
+        clear<<<1, K>>>(d_sum, d_count);
         cudaDeviceSynchronize();
 
         assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
@@ -150,6 +183,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         check_modify<<<blocks, threads>>>(d_modify_record, d_not_done, N);
         cudaDeviceSynchronize();
         cudaMemcpy(&not_done, d_not_done, sizeof(int), cudaMemcpyDeviceToHost);
+        
 
         iterations++;
     } while(not_done);
