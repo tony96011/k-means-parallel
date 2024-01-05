@@ -125,13 +125,14 @@ __global__ void clear(Point *sum, int *count){
 }
 
 //driver function
+Point* points;
 void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float** centroids, int* num_iterations){
 
     int* d_not_done, *d_count;
     int not_done;
+    points = (Point*) malloc(N * sizeof(Point));
     //array to keep a track of distances of a point from all centroids, to take the minimum out of them
     double *d_distances;
-    Point points[N];
     short *d_modify_record;
     Point *d_points, *d_centr,*d_sum;
     //---------------------------
@@ -312,10 +313,10 @@ int main(int argc, char const *argv[])
 	//---------------------------------------------------------------------
 	int N;					//no. of data points (input)
 	int K;					//no. of clusters to be formed (input)
-	int* data_points;		//data points (input)
 	int* cluster_points;	//clustered data points (to be computed)
 	float* centroids;			//centroids of each iteration (to be computed)
 	int num_iterations;    //no of iterations performed by algo (to be computed)
+    int* data_points;		//data points (input)
 	//---------------------------------------------------------------------
 
 	clock_t start_time, end_time;
@@ -331,14 +332,15 @@ int main(int argc, char const *argv[])
 		| pt1_x | pt1_y | pt1_z | pt2_x | pt2_y | pt2_z | ...
 		 -----------------------------------------------
 	*/
+    
 	dataset_in (argv[2], &N, &data_points);
-
 	start_time = clock();
 	// /*
 	// 	*****************************************************
 	// 		TODO -- You must implement this function
 	// 	*****************************************************
 	// */
+    
 	kmeans_CUDA(N, K, data_points, &cluster_points, &centroids, &num_iterations);
 	end_time = clock();
 
@@ -346,6 +348,7 @@ int main(int argc, char const *argv[])
 	// 	-- Pre-defined function --
 	// 	reads cluster_points and centroids and save it it appropriate files
 	// */
+    
 	clusters_out (argv[3], N, cluster_points);
 	// centroids_out (argv[4], K, num_iterations, centroids);
 
