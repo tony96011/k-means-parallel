@@ -25,16 +25,26 @@ __device__ Point mean(Point arr[], int N);
 // __device__ void putback(Point centr[],int K);
 
 __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double *distances, short *d_modify_record){
-    
+    /*share mem*/
+    // __shared__ Point s_centr[10];
+    // int thread_id = threadIdx.x;
+    // if(thread_id < K){
+    //     s_centr[thread_id] = centr[thread_id];
+    // }
+    // __syncthreads();
+
     //computing distance of a point and assigning all the data points, a centroid/cluster value
     int point_id = blockIdx.x*1024+threadIdx.x;
     Point cur = points[point_id];
     if(point_id>=N) return;
 
+    #pragma unroll
     for(int j=0; j<K ; j++){
         distances[point_id*K+j] = euclid(cur, centr[j]);
     }
     int index = 0;
+    
+    #pragma unroll
     for(int i = 1; i < K; i++)
     {
         if(distances[point_id*K+i] < distances[point_id*K+index])
@@ -48,9 +58,11 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
 
 __global__ void update_centroids(int K, Point *sum, int *count, Point *centr){
     int cluster_id = threadIdx.x;
-    centr[cluster_id].x = sum[cluster_id].x/count[cluster_id];
-    centr[cluster_id].y = sum[cluster_id].y/count[cluster_id];
-    centr[cluster_id].z = sum[cluster_id].z/count[cluster_id];
+    int count_cluster = count[cluster_id];
+    Point cur_sum = sum[cluster_id];
+    centr[cluster_id].x = cur_sum.x/count_cluster;
+    centr[cluster_id].y = cur_sum.y/count_cluster;
+    centr[cluster_id].z = cur_sum.z/count_cluster;
 }
 __device__ double atomicAddDouble(double* address, double val) {
     unsigned long long int* address_as_ull = (unsigned long long int*)address;
@@ -115,19 +127,13 @@ __global__ void clear(Point *sum, int *count){
 //driver function
 void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float** centroids, int* num_iterations){
 
-    int* d_not_done;
+    int* d_not_done, *d_count;
     int not_done;
-    Point *d_sum;
-    Point sum[K];
-    int count[K];
-    int *d_count;
-    memset(count, 0, sizeof(count));
-    memset(sum, 0, sizeof(sum));
-    
+    //array to keep a track of distances of a point from all centroids, to take the minimum out of them
+    double *d_distances;
     Point points[N];
-    short modify_record[N];
     short *d_modify_record;
-    Point *d_points, *d_centr;
+    Point *d_points, *d_centr,*d_sum;
     //---------------------------
     int j=0;
     for (int i=0;  i<(3*N); i+=3){
@@ -147,44 +153,26 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         int random = rand()%N;//some random value
         centr[i] = points[random];
     }
-    
+
+    cudaMalloc((void**)&d_distances, N * K * sizeof(double));
     cudaMalloc((void**)&d_points, N * sizeof(Point));
-    cudaMemcpy(d_points, points, N * sizeof(Point), cudaMemcpyHostToDevice);
+    cudaMemcpyAsync(d_points, points, N * sizeof(Point), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&d_centr, K * sizeof(Point));
-    cudaMemcpy(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
+    cudaMemcpyAsync(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
     cudaMalloc((void**)&d_modify_record, N * sizeof(short));
-    cudaMemcpy(d_modify_record, modify_record, N * sizeof(short), cudaMemcpyHostToDevice); 
     cudaMalloc((void**)&d_not_done, sizeof(int));
-    cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
+    cudaMemcpyAsync(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
     cudaMalloc((void**)&d_sum, K * sizeof(Point));
-    cudaMemcpy(d_sum, sum, K * sizeof(Point), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&d_count, K * sizeof(int));
-    cudaMemcpy(d_count, count, K * sizeof(int), cudaMemcpyHostToDevice);
 
     //---------------------------
     const int threads = 1024;
     const int blocks = (N + threads - 1) / threads;
-
     
-    //array to keep a track of distances of a point from all centroids, to take the minimum out of them
-
-    double *d_distances;
-    cudaMalloc((void**)&d_distances, N * K * sizeof(double));
     assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
     cudaDeviceSynchronize();
 
-    //---------------------------
-
-    Points_Sum_Up<<<blocks, threads, K*sizeof(Point)>>>(N, K, d_points, d_sum, d_count);
-    cudaDeviceSynchronize();
-    update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
-    cudaDeviceSynchronize();
-    clear<<<1, K>>>(d_sum, d_count);
-    cudaDeviceSynchronize();
-    //---------------------------
-
     int iterations = 1;
-
 
     do {
         /*initial not_done*/
@@ -204,7 +192,6 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         check_modify<<<blocks, threads>>>(d_modify_record, d_not_done, N);
         cudaDeviceSynchronize();
         cudaMemcpy(&not_done, d_not_done, sizeof(int), cudaMemcpyDeviceToHost);
-        
 
         iterations++;
     } while(not_done);
@@ -215,6 +202,11 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     cudaMemcpy(centr, d_centr, K * sizeof(Point), cudaMemcpyDeviceToHost);
     cudaFree(d_points);
     cudaFree(d_centr);
+    cudaFree(d_distances);
+    cudaFree(d_modify_record);
+    cudaFree(d_not_done);
+    cudaFree(d_sum);
+    cudaFree(d_count);
     //---------------------------
 
     *data_point_cluster= (int*) calloc(4*N, sizeof(int));
