@@ -65,15 +65,35 @@ __device__ double atomicAddDouble(double* address, double val) {
 }
 
 // Sum all data points into sum and count the number of points in the specific cluster with "count"
-__global__ void Points_Sum_Up(int N, Point *points, Point *sum, int* count){
+__global__ void Points_Sum_Up(int N, int K, Point *points, Point sum, int count){
+    extern __shared__ Point s_sum[];
     int point_id = blockIdx.x*1024+threadIdx.x;
+    int thread_id = threadIdx.x;
     if(point_id>=N) return;
+
+    if(threadIdx.x < K){
+        s_sum[threadIdx.x].x = 0;
+        s_sum[threadIdx.x].y = 0;
+        s_sum[threadIdx.x].z = 0;
+    }
+    __syncthreads();
+
     Point cur = points[point_id];
+    int i = cur.cluster;
     atomicAdd(&count[cur.cluster], 1);
     /*TODO:should use Atomic but there's no atomic add for double in current GPU board*/
-    atomicAddDouble(&sum[cur.cluster].x, cur.x);
-    atomicAddDouble(&sum[cur.cluster].y, cur.y);
-    atomicAddDouble(&sum[cur.cluster].z, cur.z);
+    atomicAddDouble(&s_sum[i].x, cur.x);
+    atomicAddDouble(&s_sum[i].y, cur.y);
+    atomicAddDouble(&s_sum[i].z, cur.z);
+
+    __syncthreads();
+
+    if (thread_id < K) {
+        //printf("%f\n", s_sum[thread_id].x);
+        atomicAdd(&sum[thread_id].x, s_sum[thread_id].x);
+        atomicAdd(&sum[thread_id].y, s_sum[thread_id].y);
+        atomicAdd(&sum[thread_id].z, s_sum[thread_id].z);
+    }
 }
 
 __global__ void check_modify(short *modify_record, int *d_not_done, int N){
@@ -155,7 +175,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
 
     //---------------------------
 
-    Points_Sum_Up<<<blocks, threads>>>(N, d_points, d_sum, d_count);
+    Points_Sum_Up<<<blocks, threads>>>(N, K, d_points, d_sum, d_count);
     cudaDeviceSynchronize();
     update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
     cudaDeviceSynchronize();
@@ -171,7 +191,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         not_done = 0;
         cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice);
 
-        Points_Sum_Up<<<blocks, threads>>>(N, d_points, d_sum, d_count);
+        Points_Sum_Up<<<blocks, threads>>>(N, K, d_points, d_sum, d_count);
         cudaDeviceSynchronize();
         update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
         cudaDeviceSynchronize();
