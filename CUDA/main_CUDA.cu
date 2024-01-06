@@ -239,13 +239,29 @@ __device__ Point addtwo(Point a, Point b){
     return ans;
 }
 
+__device__ double fastPower(double base, int exponent) {
+
+    double result = 1.0;
+    double currentPower = base;
+
+    // Use binary exponentiation
+    while (exponent > 0) {
+        if (exponent % 2 == 1) {
+            result *= currentPower;
+        }
+        currentPower *= currentPower;
+        exponent /= 2;
+    }
+
+    return result;
+}
+
 //function to calculate euclidea distance between two points
 __device__ double euclid(Point a, Point b){
     double x = a.x- b.x;
     double y = a.y- b.y;
     double z = a.z- b.z;
-    double dist = sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2));
-    return dist;
+    return fastPower(x, 2) + fastPower(y, 2) + fastPower(z, 2);
 }
 
 void dataset_in (const char* dataset_filename, int* N, int** data_points){
