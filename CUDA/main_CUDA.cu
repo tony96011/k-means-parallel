@@ -136,6 +136,7 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     short *d_modify_record;
     Point *d_points, *d_centr,*d_sum;
     //---------------------------
+    
     int j=0;
     for (int i=0;  i<(3*N); i+=3){
         points[j].x  = data_points[i];
