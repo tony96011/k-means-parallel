@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+
 using namespace std;
 
 vector<int> vect;
@@ -24,16 +25,26 @@ __device__ Point mean(Point arr[], int N);
 // __device__ void putback(Point centr[],int K);
 
 __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double *distances, short *d_modify_record){
-    
+    /*share mem*/
+    // __shared__ Point s_centr[10];
+    // int thread_id = threadIdx.x;
+    // if(thread_id < K){
+    //     s_centr[thread_id] = centr[thread_id];
+    // }
+    // __syncthreads();
+
     //computing distance of a point and assigning all the data points, a centroid/cluster value
     int point_id = blockIdx.x*1024+threadIdx.x;
     Point cur = points[point_id];
-    if(point_id>N) return;
+    if(point_id>=N) return;
 
+    #pragma unroll
     for(int j=0; j<K ; j++){
         distances[point_id*K+j] = euclid(cur, centr[j]);
     }
     int index = 0;
+    
+    #pragma unroll
     for(int i = 1; i < K; i++)
     {
         if(distances[point_id*K+i] < distances[point_id*K+index])
@@ -45,27 +56,56 @@ __global__ void assign_clusters(Point *points, Point *centr,int K, int N, double
     points[point_id].cluster = index;
 }
 
-//funtion to recompute the new centroids for each cluster
-//N is the total number of data points and K is the total number of clusters
-__global__ void mean_recompute(int N, Point *points, Point *centr){
-    int count = 0;
-    Point sum;
-    sum.x = 0;
-    sum.y = 0;
-    sum.z = 0;
+__global__ void update_centroids(int K, Point *sum, int *count, Point *centr){
     int cluster_id = threadIdx.x;
-    for(int i=0; i< N ; i++){
-        if(cluster_id == points[i].cluster){
-            count++;
-            sum.x += points[i].x;
-            sum.y += points[i].y;
-            sum.z += points[i].z;
-        } 
+    int count_cluster = count[cluster_id];
+    Point cur_sum = sum[cluster_id];
+    centr[cluster_id].x = cur_sum.x/count_cluster;
+    centr[cluster_id].y = cur_sum.y/count_cluster;
+    centr[cluster_id].z = cur_sum.z/count_cluster;
+}
+__device__ double atomicAddDouble(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+
+// Sum all data points into sum and count the number of points in the specific cluster with "count"
+__global__ void Points_Sum_Up(int N, int K, Point *points, Point* sum, int* count){
+    extern __shared__ Point s_sum[];
+    int point_id = blockIdx.x*1024+threadIdx.x;
+    int thread_id = threadIdx.x;
+    if(point_id>=N) return;
+
+    if(threadIdx.x < K){
+        s_sum[threadIdx.x].x = 0;
+        s_sum[threadIdx.x].y = 0;
+        s_sum[threadIdx.x].z = 0;
     }
-    centr[cluster_id].x = sum.x/count;
-    centr[cluster_id].y = sum.y/count;
-    centr[cluster_id].z = sum.z/count;
-    // printf("%d %d\n",cluster_id, count);
+    __syncthreads();
+
+    Point cur = points[point_id];
+    int cur_cluster = cur.cluster;
+    atomicAdd(&count[cur_cluster], 1);
+    /*TODO:should use Atomic but there's no atomic add for double in current GPU board*/
+    atomicAddDouble(&s_sum[cur_cluster].x, cur.x);
+    atomicAddDouble(&s_sum[cur_cluster].y, cur.y);
+    atomicAddDouble(&s_sum[cur_cluster].z, cur.z);
+
+    __syncthreads();
+
+    if (thread_id < K) {
+        //printf("%f\n", s_sum[thread_id].x);
+        atomicAddDouble(&sum[thread_id].x, s_sum[thread_id].x);
+        atomicAddDouble(&sum[thread_id].y, s_sum[thread_id].y);
+        atomicAddDouble(&sum[thread_id].z, s_sum[thread_id].z);
+    }
 }
 
 __global__ void check_modify(short *modify_record, int *d_not_done, int N){
@@ -76,18 +116,27 @@ __global__ void check_modify(short *modify_record, int *d_not_done, int N){
     }
 }
 
+__global__ void clear(Point *sum, int *count){
+    int cluster_id = threadIdx.x;
+    sum[cluster_id].x = 0;
+    sum[cluster_id].y = 0;
+    sum[cluster_id].z = 0;
+    count[cluster_id] = 0;
+}
+
 //driver function
+Point* points;
 void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float** centroids, int* num_iterations){
 
-    int* d_not_done;
+    int* d_not_done, *d_count;
     int not_done;
-    cudaMalloc((void**)&d_not_done, sizeof(int));
-    cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
-    Point points[N];
-    short modify_record[N];
+    points = (Point*) malloc(N * sizeof(Point));
+    //array to keep a track of distances of a point from all centroids, to take the minimum out of them
+    double *d_distances;
     short *d_modify_record;
-    Point *d_points, *d_centr;
+    Point *d_points, *d_centr,*d_sum;
     //---------------------------
+    
     int j=0;
     for (int i=0;  i<(3*N); i+=3){
         points[j].x  = data_points[i];
@@ -106,42 +155,37 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
         int random = rand()%N;//some random value
         centr[i] = points[random];
     }
-    
+
+    cudaMalloc((void**)&d_distances, N * K * sizeof(double));
     cudaMalloc((void**)&d_points, N * sizeof(Point));
-    cudaMemcpy(d_points, points, N * sizeof(Point), cudaMemcpyHostToDevice);
+    cudaMemcpyAsync(d_points, points, N * sizeof(Point), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&d_centr, K * sizeof(Point));
-    cudaMemcpy(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
+    cudaMemcpyAsync(d_centr, centr, K * sizeof(Point), cudaMemcpyHostToDevice); 
     cudaMalloc((void**)&d_modify_record, N * sizeof(short));
-    cudaMemcpy(d_modify_record, modify_record, N * sizeof(short), cudaMemcpyHostToDevice); 
+    cudaMalloc((void**)&d_not_done, sizeof(int));
+    cudaMemcpyAsync(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice); 
+    cudaMalloc((void**)&d_sum, K * sizeof(Point));
+    cudaMalloc((void**)&d_count, K * sizeof(int));
 
     //---------------------------
     const int threads = 1024;
     const int blocks = (N + threads - 1) / threads;
-
     
-    //array to keep a track of distances of a point from all centroids, to take the minimum out of them
-
-    double *d_distances;
-    cudaMalloc((void**)&d_distances, N * K * sizeof(double));
     assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
     cudaDeviceSynchronize();
 
-    //---------------------------
-
-    mean_recompute<<<1, K>>>(N, d_points, d_centr);
-    cudaDeviceSynchronize();
-
-    //---------------------------
-
     int iterations = 1;
-
 
     do {
         /*initial not_done*/
         not_done = 0;
         cudaMemcpy(d_not_done, &not_done, sizeof(int), cudaMemcpyHostToDevice);
 
-        mean_recompute<<<1, K>>>(N, d_points, d_centr);
+        Points_Sum_Up<<<blocks, threads,K*sizeof(Point)>>>(N, K, d_points, d_sum, d_count);
+        cudaDeviceSynchronize();
+        update_centroids<<<1, K>>>(K, d_sum, d_count, d_centr);
+        cudaDeviceSynchronize();
+        clear<<<1, K>>>(d_sum, d_count);
         cudaDeviceSynchronize();
 
         assign_clusters<<<blocks, threads>>>(d_points, d_centr, K, N, d_distances, d_modify_record);
@@ -160,6 +204,11 @@ void kmeans_CUDA(int N, int K, int* data_points, int** data_point_cluster, float
     cudaMemcpy(centr, d_centr, K * sizeof(Point), cudaMemcpyDeviceToHost);
     cudaFree(d_points);
     cudaFree(d_centr);
+    cudaFree(d_distances);
+    cudaFree(d_modify_record);
+    cudaFree(d_not_done);
+    cudaFree(d_sum);
+    cudaFree(d_count);
     //---------------------------
 
     *data_point_cluster= (int*) calloc(4*N, sizeof(int));
@@ -190,13 +239,29 @@ __device__ Point addtwo(Point a, Point b){
     return ans;
 }
 
+__device__ double fastPower(double base, int exponent) {
+
+    double result = 1.0;
+    double currentPower = base;
+
+    // Use binary exponentiation
+    while (exponent > 0) {
+        if (exponent % 2 == 1) {
+            result *= currentPower;
+        }
+        currentPower *= currentPower;
+        exponent /= 2;
+    }
+
+    return result;
+}
+
 //function to calculate euclidea distance between two points
 __device__ double euclid(Point a, Point b){
     double x = a.x- b.x;
     double y = a.y- b.y;
     double z = a.z- b.z;
-    double dist = sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2));
-    return dist;
+    return fastPower(x, 2) + fastPower(y, 2) + fastPower(z, 2);
 }
 
 void dataset_in (const char* dataset_filename, int* N, int** data_points){
@@ -265,10 +330,10 @@ int main(int argc, char const *argv[])
 	//---------------------------------------------------------------------
 	int N;					//no. of data points (input)
 	int K;					//no. of clusters to be formed (input)
-	int* data_points;		//data points (input)
 	int* cluster_points;	//clustered data points (to be computed)
 	float* centroids;			//centroids of each iteration (to be computed)
 	int num_iterations;    //no of iterations performed by algo (to be computed)
+    int* data_points;		//data points (input)
 	//---------------------------------------------------------------------
 
 	clock_t start_time, end_time;
@@ -284,14 +349,15 @@ int main(int argc, char const *argv[])
 		| pt1_x | pt1_y | pt1_z | pt2_x | pt2_y | pt2_z | ...
 		 -----------------------------------------------
 	*/
+    
 	dataset_in (argv[2], &N, &data_points);
-
 	start_time = clock();
 	// /*
 	// 	*****************************************************
 	// 		TODO -- You must implement this function
 	// 	*****************************************************
 	// */
+    
 	kmeans_CUDA(N, K, data_points, &cluster_points, &centroids, &num_iterations);
 	end_time = clock();
 
@@ -299,6 +365,7 @@ int main(int argc, char const *argv[])
 	// 	-- Pre-defined function --
 	// 	reads cluster_points and centroids and save it it appropriate files
 	// */
+    
 	clusters_out (argv[3], N, cluster_points);
 	// centroids_out (argv[4], K, num_iterations, centroids);
 

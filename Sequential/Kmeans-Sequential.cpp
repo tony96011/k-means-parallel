@@ -26,11 +26,12 @@ Point mean(Point arr[], int N);
 void assignclusters(Point points[], Point centr[], int K, int N);
 void putback(Point centr[], int K);
 
+Point *points;
 // driver function
 void kmeans_sequential(int N, int K, int *data_points, int **data_point_cluster, float **centroids, int *num_iterations)
 {
-    Point points[N];
-
+    
+    points = (Point *)calloc(N, sizeof(Point));
     //---------------------------
     int j = 0;
     for (int i = 0; i < (3 * N); i += 3)
