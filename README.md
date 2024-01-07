@@ -1,5 +1,5 @@
-## Note: the sequential, omp, p-threads code are fork from https://github.com/vinayak1998/Parallel-K-Means-Clustering. 
-## We optimize the code using CUDA on top of it.
+#### Note: the sequential, omp, p-threads code are fork from https://github.com/vinayak1998/Parallel-K-Means-Clustering. 
+#### We optimize the code using CUDA on top of it.
 # Parallel-K-Means-Clustering with CUDA
 - Greatly speedup k-means clustering computation time for up to 74.46x in our experiment.
 - Reduce the time complexity from O(N*K*T) to O(T(K+a)), a and K are small
