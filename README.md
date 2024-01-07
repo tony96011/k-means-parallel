@@ -1,28 +1,23 @@
-# Parallel-K-Means-Clustering
-Sequential and Parallel(using Open MP and Pthreads) Implementations(c++) of the K Means Clustering Algorithm and visualizing the results for a comparative study of the Speedup and Efficiency achieved in 3 different implementations
+## Note: the sequential, omp, p-threads code are fork from https://github.com/vinayak1998/Parallel-K-Means-Clustering. 
+## We optimize the code using CUDA on top of it.
+# Parallel-K-Means-Clustering with CUDA
+- Greatly speedup k-means clustering computation time for up to 74.46x in our experiment.
+- Reduce the time complexity from O(N*K*T) to O(T(K+a)), a and K are small
+- In our implementation, the program is no longer bounded by computation time.
+For more detail introduction, implementation and evaluation, please refer to **PP_final_project.pdf**
 
 ## Execution
-- **Sequential**
-  - cd into Sequential folder
-  - `g++ main_sequential.c lab1_io.c Kmeans-Sequential.cpp -fopenmp -o seq.out`
-  - `./seq.out 4 sample_dataset_50000_4.txt b.txt c.txt`
-  - 4 is for the number of clusters. Can be changed.
-  - To Visualize the results :- `python visualise.py b.txt`
-    
-- **OpenMP**
-  - cd into OpenMP folder
-  - `g++ main_omp.c lab1_io.c Kmeans-OpenMP.cpp -fopenmp -o omp.out`
-  - `./omp.out 4 2 sample_dataset_5000_3.txt b.txt c.txt`
-  - 4 is for the number of clusters and 2 is for the number of threads. Both can be changed.
-  - To Visualize the results :- `python visualise.py b.txt`
-  
-- **P-Threads**
-  - cd into P-Threads folder
-  - `g++ lab1_io.c main_pthread.c Kmeans-Pthreads.cpp -o ptry.out -fopenmp`
-  - `./ptry.out 4 2 sample_dataset_50000_4.txt b.txt c.txt`
-  - 4 is for the number of clusters and 2 is for the number of threads. Both can be changed.
-  - To Visualize the results :- `python visualise.py b.txt`
-  
-### Sample Visualization
-  
-![alt text](https://github.com/vinayak1998/Parallel-K-Means-Clustering/blob/master/Sample_Visualization(K%3D3).png)
+- **CUDA**
+  - cd into CUDA folder
+  - make to compile
+  - we offer 3 script:
+    - correctness.sh for testing the correctness
+    - k_perf.sh for testing diff K
+    - performance.sh for testing diff N
+    - please refer to the bash file for sample execution
+- **Input**
+  - we also offer an input generator in Input folder
+  - pleaes use ./input_generator <N> for generating the input data.   
+- for other version please refer to the root author's repository
+ 
+
