@@ -17,7 +17,7 @@ For more detail introduction, implementation and evaluation, please refer to [**
     - please refer to the bash file for sample execution
 - **Input**
   - we also offer an input generator in Input folder
-  - pleaes use ./input_generator <N> for generating the input data.   
+  - pleaes use ./input_generator N for generating the input data.   
 - for other version please refer to the root author's repository
  
 
