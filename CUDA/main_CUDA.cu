@@ -5,7 +5,7 @@
 #include <cmath>
 #include <stdlib.h>
 #include <stdio.h>
-
+#define double float
 
 using namespace std;
 
@@ -64,17 +64,18 @@ __global__ void update_centroids(int K, Point *sum, int *count, Point *centr){
     centr[cluster_id].y = cur_sum.y/count_cluster;
     centr[cluster_id].z = cur_sum.z/count_cluster;
 }
-__device__ double atomicAddDouble(double* address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
+__device__ float atomicAddDouble(float* address, float val) {
+    unsigned int* address_as_uint = (unsigned int*)address;
+    unsigned int old = *address_as_uint, assumed;
 
     do {
         assumed = old;
-        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+        old = atomicCAS(address_as_uint, assumed, __float_as_uint(val + __uint_as_float(assumed)));
     } while (assumed != old);
 
-    return __longlong_as_double(old);
+    return __uint_as_float(old);
 }
+
 
 // Sum all data points into sum and count the number of points in the specific cluster with "count"
 __global__ void Points_Sum_Up(int N, int K, Point *points, Point* sum, int* count){
